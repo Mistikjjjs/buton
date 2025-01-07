@@ -1,5 +1,5 @@
 {
-  "name": "whatsappbot",
+  "name": "watch-media-more-than-once",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -8,23 +8,11 @@
     "start": "npm install && node ."
   },
   "keywords": [],
-  "author": "W4LX",
+  "author": "Walter",
   "license": "ISC",
   "dependencies": {
-    "@discordjs/collection": "^2.1.0",
-    "@distube/ytdl-core": "^4.15.1",
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@hapi/boom": "^10.0.1",
-    "@mrnima/tiktok-downloader": "^1.0.0",
     "baileys": "github:AxellNetwork/Baileys",
-    "axios": "^1.5.1",
-    "btch-downloader": "^2.8.2",
-    "cache-manager": "^4.0.1",
-    "fluent-ffmpeg": "^2.1.2",
-    "genius-lyrics": "^4.4.6",
-    "hercai": "^12.4.0",
-    "simple-tts-mp3": "^1.1.0",
-    "wikipedia": "^2.1.1",
-    "yt-search": "^2.11.1"
+    "pino": "^8.16.2"
   }
 }
