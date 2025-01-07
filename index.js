@@ -3,17 +3,12 @@ import {
   useMultiFileAuthState,
   Browsers,
 } from "baileys";
-import { Collection } from "@discordjs/collection";
 import { createInterface } from "node:readline";
-import { resolve } from "node:path";
-import { readdir } from "node:fs/promises";
 import { path } from "@ffmpeg-installer/ffmpeg";
 import ffmpeg from "fluent-ffmpeg";
 import pino from "pino";
 
 // Node.js versión >= 20
-process.loadEnvFile();
-
 ffmpeg.setFfmpegPath(path);
 
 const rl = createInterface({
@@ -33,19 +28,11 @@ async function connectToWhatsApp() {
     browser: Browsers.appropriate("chrome"),
   });
 
-  socket.commands = new Collection();
-
   if (!socket.authState.creds.registered) {
     const number = await question(`Escribe tú número de WhatsApp:`);
     const formatNumber = number.replace(/[\s+\-()]/g, "");
     const code = await socket.requestPairingCode(formatNumber);
     console.log(`Tu codigo de conexión es: ${code}`);
-  }
-
-  const directory = await readdir(resolve("src", "handlers"));
-
-  for (const file of directory) {
-    (await import(`./handlers/${file}`)).default(socket);
   }
 
   socket.ev.on("creds.update", saveCreds);
@@ -89,8 +76,6 @@ async function connectToWhatsApp() {
 }
 
 connectToWhatsApp();
-
-export { connectToWhatsApp };
 
 process.on("uncaughtException", console.error);
 process.on("unhandledRejection", console.error);
