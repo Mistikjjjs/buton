@@ -13,7 +13,5 @@
   "dependencies": {
     "@hapi/boom": "^10.0.1",
     "baileys": "github:AxellNetwork/Baileys",
-    "pino": "^8.16.2",
-    "pino-pretty": "^10.2.3",
   }
 }
