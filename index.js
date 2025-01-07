@@ -4,11 +4,13 @@ import {
     generateWAMessageFromContent,
     DisconnectReason,
     Browsers,
+    prepareWAMessageMedia,
 } from "baileys";
 import { createInterface } from "node:readline";
 import { keepAlive } from "./keepAlive.js";
 import { Boom } from "@hapi/boom";
 import { pino } from "pino";
+import { randomBytes } from "crypto";
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -32,18 +34,9 @@ const logger = pino({
 
 // Función principal de conexión
 async function connectToWA() {
-    // Verificación de versión de Node
-    const version = process.versions.node.split(".")[0];
-    if (+version < 18) {
-        console.log("Necesitas Node.js versión 18 o superior.");
-        return;
-    }
-
-    // Configuración de autenticación
     const { state, saveCreds } = await useMultiFileAuthState("auth");
     const browser = Browsers.appropriate("chrome");
 
-    // Crear socket de conexión
     const socket = makeWASocket({
         logger: pino({ level: "silent" }),
         mobile: false,
@@ -51,22 +44,6 @@ async function connectToWA() {
         browser
     });
 
-    // Manejo de autenticación inicial
-    if (!socket.authState.creds.registered) {
-        const readline = createInterface({
-            input: process.stdin,
-            output: process.stdout
-        });
-
-        const prompt = (input) => new Promise((resolve) => readline.question(input, resolve));
-        const number = await prompt("Introduce tu número de WhatsApp: ");
-        const formatNumber = number.replace(/[\s()+-]/g, "");
-        const code = await socket.requestPairingCode(formatNumber);
-        console.log("Tu código de conexión es:", code);
-        readline.close();
-    }
-
-    // Manejador de mensajes
     socket.ev.on("messages.upsert", async ({ type, messages }) => {
         if (!messages[0]?.message) return;
         if (type !== "notify") return;
@@ -79,59 +56,30 @@ async function connectToWA() {
                     msg.message?.videoMessage?.caption || 
                     msg.message?.extendedTextMessage?.text || '';
 
-        // Comandos sin prefijo
-        switch(body.toLowerCase()) {
-            case 'menu':
-                await sendMenu(socket, from);
-                break;
-            case 'hola':
-                await socket.sendMessage(from, { text: '👋 ¡Hola! ¿En qué puedo ayudarte?' });
-                break;
-            case 'bot':
-                await socket.sendMessage(from, { text: '✅ Bot activo y funcionando' });
-                break;
-            case 'ping':
-                await socket.sendMessage(from, { text: '🚀 Pong!' });
-                break;
-        }
-
-        // Comandos con prefijo
         if (body.startsWith(config.prefix)) {
             const args = body.slice(config.prefix.length).trim().split(/ +/);
             const command = args.shift().toLowerCase();
 
             switch(command) {
-                case 'help':
-                    await sendHelp(socket, from);
+                case 'button1':
+                    await sendQuickReplyButton(socket, from);
                     break;
-                case 'sticker':
-                    await createSticker(socket, msg, from);
+                case 'button2':
+                    await sendCopyCodeButton(socket, from);
                     break;
-                // Añade más comandos aquí
-            }
-        }
-
-        // Procesamiento de mensajes view-once
-        const msgType = Object.keys(msg.message)[0];
-        const pattern = /^(messageContextInfo|senderKeyDistributionMessage|viewOnceMessage(?:V2(?:Extension)?)?)$/;
-        
-        if (pattern.test(msgType)) {
-            const lastKey = Object.keys(msg.message).at(-1);
-            if (/^viewOnceMessage(?:V2(?:Extension)?)?$/.test(lastKey)) {
-                const fileType = Object.keys(msg.message[lastKey].message)[0];
-                delete msg.message[lastKey].message[fileType].viewOnce;
-                
-                if (socket?.user?.id) {
-                    const proto = generateWAMessageFromContent(from, msg.message, {});
-                    socket.relayMessage(socket.user.id, proto.message, {
-                        messageId: proto.key.id
-                    });
-                }
+                case 'button3':
+                    await sendCallButton(socket, from);
+                    break;
+                case 'button4':
+                    await sendInteractiveButton(socket, from);
+                    break;
+                default:
+                    await socket.sendMessage(from, { text: `Comando desconocido: ${command}` });
+                    break;
             }
         }
     });
 
-    // Manejador de conexión
     socket.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect } = update;
 
@@ -139,12 +87,6 @@ async function connectToWA() {
             const shouldReconnect = 
                 (lastDisconnect.error instanceof Boom)?.output?.statusCode !== 
                 DisconnectReason.loggedOut;
-
-            console.log(
-                "Conexión cerrada debido a",
-                lastDisconnect.error + ", reconectando...",
-                shouldReconnect
-            );
 
             if (shouldReconnect) {
                 connectToWA();
@@ -155,69 +97,116 @@ async function connectToWA() {
         }
     });
 
-    // Manejador de credenciales
     socket.ev.on("creds.update", saveCreds);
 }
 
-// Funciones auxiliares
-async function sendMenu(socket, jid) {
-    const menuText = `
-╭━━⊰ *MENU PRINCIPAL* ⊱━━━╮
-┃
-┃ 💫 *COMANDOS DISPONIBLES*
-┃ 
-┃ ➸ *!help* - Ayuda detallada
-┃ ➸ *!sticker* - Crear sticker
-┃ ➸ *!ping* - Test de velocidad
-┃ ➸ *!owner* - Creador del bot
-┃
-┃ 🤖 *COMANDOS SIN PREFIJO*
-┃
-┃ ➸ *menu* - Este menú
-┃ ➸ *hola* - Saludar al bot
-┃ ➸ *bot* - Verificar estado
-┃
-╰━━━━━━━━━━━━━━━━━╯`;
+// Funciones auxiliares para los botones
+async function sendQuickReplyButton(socket, jid) {
+    const messageContent = {
+        interactiveMessage: {
+            body: { text: 'Ejemplo de botón de respuesta rápida' },
+            nativeFlowMessage: {
+                buttons: [
+                    {
+                        buttonParamsJson: JSON.stringify({
+                            display_text: "¡Responde!",
+                            id: "quick_reply_option",
+                        }),
+                        name: "quick_reply",
+                    },
+                ],
+                messageParamsJson: "{}",
+                messageVersion: 1,
+            },
+        },
+    };
 
-    await socket.sendMessage(jid, {
-        text: menuText,
-        footer: `©️ ${config.botName} | v${config.version}`,
-        buttons: [
-            { buttonId: 'help', buttonText: { displayText: '📚 Ayuda' }, type: 1 },
-            { buttonId: 'owner', buttonText: { displayText: '👑 Creador' }, type: 1 }
-        ]
-    });
+    const proto = generateWAMessageFromContent(jid, messageContent, { userJid: socket.user.id });
+    await socket.relayMessage(jid, proto.message, { messageId: proto.key.id });
 }
 
-async function sendHelp(socket, jid) {
-    const helpText = `
-📚 *GUÍA DE USO*
+async function sendCopyCodeButton(socket, jid) {
+    const messageContent = {
+        interactiveMessage: {
+            body: { text: 'Ejemplo de botón para copiar código' },
+            nativeFlowMessage: {
+                buttons: [
+                    {
+                        buttonParamsJson: JSON.stringify({
+                            display_text: "Copiar este código",
+                            id: "copy_code",
+                            copy_code: "123456",
+                        }),
+                        name: "cta_copy",
+                    },
+                ],
+                messageParamsJson: "{}",
+                messageVersion: 1,
+            },
+        },
+    };
 
-*1.* Para crear stickers:
-- Envía una imagen con el comando *!sticker*
-- O responde a una imagen con *!sticker*
-
-*2.* Comandos básicos:
-- *!ping* - Ver velocidad del bot
-- *!owner* - Información del creador
-
-*3.* Soporte:
-- Grupo: ${config.groupLink}
-- GitHub: ${config.githubRepo}
-`;
-
-    await socket.sendMessage(jid, { text: helpText });
+    const proto = generateWAMessageFromContent(jid, messageContent, { userJid: socket.user.id });
+    await socket.relayMessage(jid, proto.message, { messageId: proto.key.id });
 }
 
-async function createSticker(socket, msg, jid) {
-    // Implementa la lógica para crear stickers aquí
-    await socket.sendMessage(jid, { text: 'Función de stickers en desarrollo' });
+async function sendCallButton(socket, jid) {
+    const messageContent = {
+        interactiveMessage: {
+            body: { text: 'Ejemplo de botón para llamada' },
+            nativeFlowMessage: {
+                buttons: [
+                    {
+                        buttonParamsJson: JSON.stringify({
+                            display_text: "Llamar al soporte",
+                            phone_number: "1234567890",
+                        }),
+                        name: "cta_call",
+                    },
+                ],
+                messageParamsJson: "{}",
+                messageVersion: 1,
+            },
+        },
+    };
+
+    const proto = generateWAMessageFromContent(jid, messageContent, { userJid: socket.user.id });
+    await socket.relayMessage(jid, proto.message, { messageId: proto.key.id });
+}
+
+async function sendInteractiveButton(socket, jid) {
+    const sections = [
+        {
+            title: "Opciones Avanzadas",
+            rows: [
+                { title: "Opción 1", description: "Descripción de Opción 1", id: "opcion_1" },
+                { title: "Opción 2", description: "Descripción de Opción 2", id: "opcion_2" },
+            ],
+        },
+    ];
+
+    const messageContent = {
+        interactiveMessage: {
+            body: { text: 'Ejemplo de botón interactivo con opciones' },
+            nativeFlowMessage: {
+                buttons: [
+                    {
+                        name: "single_select",
+                        buttonParamsJson: JSON.stringify({
+                            title: "Menú de Opciones",
+                            sections: sections,
+                        }),
+                    },
+                ],
+                messageParamsJson: "{}",
+                messageVersion: 1,
+            },
+        },
+    };
+
+    const proto = generateWAMessageFromContent(jid, messageContent, { userJid: socket.user.id });
+    await socket.relayMessage(jid, proto.message, { messageId: proto.key.id });
 }
 
 // Iniciar el bot
 await connectToWA();
-
-// Manejo de errores globales
-process.on("uncaughtExceptionMonitor", console.error);
-process.on("unhandledRejection", console.error);
-process.on("uncaughtException", console.error);
